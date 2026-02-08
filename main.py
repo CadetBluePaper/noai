@@ -14,7 +14,7 @@ It does not have the necessary security measures in place to be safely run
 on a local machine (I almost nuked my computer lol). If you do want to run this
 just make sure to specify the directory correctly in the .env file. 
 
-Author: Noah Toral
+Author: CadetBluePaper
 """
 import os
 import argparse

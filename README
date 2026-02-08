@@ -1,0 +1,22 @@
+This was meant for me to learn more about the GEMINI API and how agents work, so its not
+really meant for proper use. I wouldn't reccomend using this code on your own machine, as I didn't 
+implement any real security protcols, so if the directory is changed to a sensitive one, it could
+mess stuff up (almost did that to myself lol). 
+
+If you do want to run it, you will need a Gemini API key, aswell as .env file.
+Here's a sample of my .env file:
+
+GEMINI_API_KEY=""
+
+FILE_CHARACTER_LIMIT=10000
+
+MAX_FILE_CHARS=10000
+
+WORKING_DIR="./your_directory_here"
+
+SYSTEM_PROMPT="Your system prompt here"
+
+I probably wont add any more features to this code, as it was just meant for me to learn and
+experiment. Overall this was pretty fun to make, bye!
+
+Author: CadetBluePaper
