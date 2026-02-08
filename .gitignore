@@ -1,0 +1,10 @@
+#Virtual Enviorment 
+venv/
+__pycache__/
+
+#Enviorment Variables
+.env
+.env.local
+
+#Test Files
+calculator/
