@@ -1,100 +1,154 @@
+"""
+Main file for the Gemini agent appplication.
+
+This file sets up the argument parser, loads environment variables,
+and sets up the main agent loop that interacts with the Gemini API, 
+handles function calls, and manages the conversation history.
+
+Important Note:
+
+DO NOT use this code on your own machine, this project was meant for me to 
+learn about the Gemini API and AI agents
+
+It does not have the necessary security measures in place to be safely run
+on a local machine (I almost nuked my computer lol). If you do want to run this
+just make sure to specify the directory correctly in the .env file. 
+
+Author: Noah Toral
+"""
 import os
 import argparse
+from typing import List
+
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from functions.functions import schema_get_files, schema_get_file_content, schema_write_file, schema_run_python_file
-from functions.functions import call_function
 
-def main():
-    #load environment variables from .env file
+from functions.functions import (
+    SCHEMA_LIST_DIRECTORY,
+    SCHEMA_READ_FILE,
+    SCHEMA_WRITE_FILE,
+    SCHEMA_EXECUTE_PYTHON,
+    dispatch_tool_call,
+)
+
+MODEL_NAME = "gemini-2.5-flash"
+MAX_ITERATIONS = 20
+
+
+def main() -> None:
+    """Entry point for the Gemini agent application."""
     load_dotenv()
-    api_key = os.environ.get("GEMINI_API_KEY")
-    system_prompt = os.environ.get("SYSTEM_PROMPT")
 
-    client = genai.Client(api_key=api_key)
+    api_key: str | None = os.environ.get("GEMINI_API_KEY")
+    system_instruction: str | None = os.environ.get("SYSTEM_PROMPT")
 
-    #set up argument parser
+    if not api_key or not system_instruction:
+        raise RuntimeError(
+            "Missing required environment variables: "
+            "GEMINI_API_KEY and/or SYSTEM_PROMPT"
+        )
+
+    client: genai.Client = genai.Client(api_key=api_key)
+
     parser = argparse.ArgumentParser(description="Hyperparameter Arguments")
+    parser.add_argument(
+        "--prompt",
+        type=str,
+        required=True,
+        help="The prompt to generate content for.",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose output.",
+    )
 
-    parser.add_argument("--prompt", type=str, required=True, help="The prompt to generate content for.")
-    parser.add_argument("--verbose", type=bool, default=False, help="Enable verbose output.")
+    cli_args = parser.parse_args()
 
-    args = parser.parse_args()
+    conversation_history: List[types.Content] = [
+        types.Content(
+            role="user",
+            parts=[types.Part(text=cli_args.prompt)],
+        )
+    ]
 
-    #create messages list
-    message_history = [types.Content(role="user", parts=[types.Part(text=args.prompt)])]
+    run_agent_loop(
+        client=client,
+        conversation_history=conversation_history,
+        verbose=cli_args.verbose,
+        system_instruction=system_instruction,
+    )
 
-    #content_loop
-    feedback_loop(client, message_history, args.verbose, system_prompt)
 
-def feedback_loop(client, message_history, verbose, system_prompt, max_iterations=5):
-    
-    available_functions = types.Tool(
+def run_agent_loop(
+    client: genai.Client,
+    conversation_history: List[types.Content],
+    verbose: bool,
+    system_instruction: str,
+    max_iterations: int = MAX_ITERATIONS,
+) -> None:
+    """
+    Main feedback loop for the agent.
+
+    Args:
+        client: Gemini API client.
+        conversation_history: Accumulated conversation history.
+        verbose: Enable verbose output.
+        system_instruction: System prompt for the model.
+        max_iterations: Maximum number of loop iterations.
+    """
+    available_tools = types.Tool(
         function_declarations=[
-            schema_get_files,
-            schema_get_file_content,
-            schema_write_file,
-            schema_run_python_file
+            SCHEMA_LIST_DIRECTORY,
+            SCHEMA_READ_FILE,
+            SCHEMA_WRITE_FILE,
+            SCHEMA_EXECUTE_PYTHON,
         ]
     )
 
     for _ in range(max_iterations):
-        try: 
-            #generate content
-            response = client.models.generate_content(
-                model="gemini-2.5-flash", 
-                contents=message_history,
+        try:
+            model_response = client.models.generate_content(
+                model=MODEL_NAME,
+                contents=conversation_history,
                 config=types.GenerateContentConfig(
-                    tools=[available_functions], 
-                    system_instruction=system_prompt
-                )
+                    tools=[available_tools],
+                    system_instruction=system_instruction,
+                ),
             )
 
-            if verbose: 
-                print(f"Prompt tokens used: {response.usage_metadata.prompt_token_count}")
-                print(f"Response tokens used: {response.usage_metadata.candidates_token_count}")
+            if verbose and model_response.usage_metadata:
+                print(
+                    f"Prompt tokens used: "
+                    f"{model_response.usage_metadata.prompt_token_count}"
+                )
+                print(
+                    f"Response tokens used: "
+                    f"{model_response.usage_metadata.candidates_token_count}"
+                )
 
-            #Add the models response to the message history
-            for candidate in response.candidates:
-                message_history.append(candidate.content)
+            for candidate in model_response.candidates:
+                conversation_history.append(candidate.content)
 
-            if response.text: 
-                print(f"Final response: {response.text}")
+            if model_response.text:
+                print(f"Final response: {model_response.text}")
                 break
-            
-            #Function calls
-            if response.function_calls:
-                function_responses = []
-                for function in response.function_calls:
-                    result = call_function(function, verbose=verbose)
-                    function_responses.append(result)
 
+            if model_response.function_calls:
+                for function_call in model_response.function_calls:
+                    tool_response = dispatch_tool_call(
+                        function_call,
+                        verbose=verbose,
+                    )
+                    conversation_history.append(tool_response)
 
-                    try:
-                        call_response = result.parts[0].function_response.response
-                        if verbose:
-                            print(f" -> {call_response}")
-                    except (AttributeError, IndexError):
-                        print(" -> No response from function call.")
-
-                for tool_content in function_responses:
-                    message_history.append(tool_content)
-
-        except Exception as e:
-            print(f"Error during generation: {e}")
+        except Exception as exc:
+            print(f"Error during generation: {exc}")
             break
-
     else:
         print("Max iterations reached without completion, exiting...")
 
+        
 if __name__ == "__main__":
     main()
-                
-
-
-
-
-
-
-
